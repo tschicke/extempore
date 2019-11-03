@@ -65,6 +65,7 @@
 #include <stack>
 #include <list>
 #include <string>
+#include <fstream>
 
 namespace extemp {
 
@@ -141,6 +142,9 @@ struct scheme {
     pointer func_called_by_extempore; //for use in stack tracing
     pointer last_symbol_apply;
     std::stack<pointer> applied_symbol_names;
+	std::stack<uint64_t> applied_by;
+	uint64_t pc = 0;
+	std::ofstream out_file;
 
     // USED BY DUMP_STACK_COPY
     pointer tmp_dump;

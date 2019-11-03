@@ -3,6 +3,8 @@ extempore
 extempore.exe
 extempore.lib
 
+*.exe
+
 # boost
 /boost
 

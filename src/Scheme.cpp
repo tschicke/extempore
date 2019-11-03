@@ -77,6 +77,9 @@
 #ifndef _WIN32
 #include <unistd.h>
 #endif
+#ifdef _WIN32
+#include <direct.h>
+#endif
 #if USE_DL
 # include "dynload.h"
 #endif
@@ -150,6 +153,20 @@ static const char *strlwr(char *s) {
 # define FIRST_CELLSEGS 1
 #endif
 
+
+
+const char *opcode_names[] = {
+#define _OP_DEF(A,B,C,D,E,OP) #OP,
+#include "OPDefines.h"
+};
+
+void writeOp(scheme *sc, scheme_opcodes op) {
+	sc->out_file << static_cast<char>(op);
+}
+
+void writeRet(scheme *sc, uint64_t pc_scheduled_by) {
+	sc->out_file << static_cast<char>(254) << pc_scheduled_by;
+}
 
 static pointer _Error_1(scheme *sc, const char *s, pointer a, int location, int errnum=0);
 
@@ -3070,6 +3087,7 @@ static pointer _Error_1(scheme *sc, const char *s, pointer a, int location, int 
           std::cout << "stack-catch: " << ss.str() << std::endl;
           cnt++;
           sc->applied_symbol_names.pop();
+		  sc->applied_by.pop();
         }
     }
 
@@ -3079,14 +3097,16 @@ static pointer _Error_1(scheme *sc, const char *s, pointer a, int location, int 
         if(is_symbol(item)) {
             if(strcmp(current,symname_sc(sc,item)) == 0) {
                 sc->applied_symbol_names.pop();
-                continue;
+				sc->applied_by.pop();
+				continue;
             }
             sss << " <- " << symname_sc(sc,item);
             current = symname_sc(sc,item);
         }
         cnt++;
         sc->applied_symbol_names.pop();
-    }
+		sc->applied_by.pop();
+	}
     //if(cnt>9) sss << " ... " << std::endl;
     //else sss << std::endl;
 
@@ -3144,7 +3164,8 @@ static pointer _Error_1(scheme *sc, const char *s, pointer a, int location, int 
         while(!sc->applied_symbol_names.empty())
         {
             sc->applied_symbol_names.pop();
-        }
+			sc->applied_by.pop();
+		}
         return sc->T;
     }
 
@@ -3183,7 +3204,8 @@ static pointer _Error_1(scheme *sc, const char *s, pointer a, int location, int 
     while(!sc->applied_symbol_names.empty())
       {
         sc->applied_symbol_names.pop();
-      }
+		sc->applied_by.pop();
+	}
     return sc->T;
   }
 
@@ -3205,7 +3227,8 @@ static pointer _Error_1(scheme *sc, const char *s, pointer a, int location, int 
   while(!sc->applied_symbol_names.empty())
     {
       sc->applied_symbol_names.pop();
-    }
+	  sc->applied_by.pop();
+  }
   sc->last_symbol_apply = sc->NIL;
   sc->call_end_time = ULLONG_MAX;
 
@@ -3214,10 +3237,16 @@ static pointer _Error_1(scheme *sc, const char *s, pointer a, int location, int 
 #define Error_1(sc,s,a,l) return _Error_1(sc,s,a,l)
 #define Error_0(sc,s,l)    return _Error_1(sc,s,0,l)
 
+void test(scheme *sc, int op) {
+	int t = 0;
+	sc = 0;
+}
+
 /* Too small to turn into function */
 # define  BEGIN     do {
 # define  END  } while (0)
 #define s_goto(sc,a) BEGIN                      \
+    test(sc, a);                                   \
     sc->op = (int)(a);                          \
     return sc->T; END
 
@@ -3230,7 +3259,8 @@ static pointer _Error_1(scheme *sc, const char *s, pointer a, int location, int 
 static void s_save(scheme *sc, enum scheme_opcodes op, pointer args, pointer code)
 {
     sc->applied_symbol_names.push(sc->last_symbol_apply);
-//      if(is_symbol(sc->last_symbol_apply)) {
+	sc->applied_by.push((scheme_opcodes)sc->op);
+	//      if(is_symbol(sc->last_symbol_apply)) {
 //              std::cout << "PUSH SYM " << sc->applied_symbol_names.size() << " " << symname(sc->last_symbol_apply) << std::endl;
 //      }else{
 //              std::cout << "PUSH SYM " << sc->applied_symbol_names.size() << std::endl;
@@ -3259,8 +3289,10 @@ static pointer _s_return(scheme *sc, pointer a)
         sc->last_symbol_apply = sc->NIL;
     }else{
         sc->last_symbol_apply = sc->applied_symbol_names.top();
+		writeRet(sc, sc->applied_by.top());
         sc->applied_symbol_names.pop();
-    }
+		sc->applied_by.pop();
+	}
 
     intptr_t nframes = (intptr_t)sc->dump;
     struct dump_stack_frame *frame;
@@ -5717,9 +5749,11 @@ static void Eval_Cycle(scheme *sc, enum scheme_opcodes op) {
             }
         }
         old_op=sc->op;
-        if (pcd->func(sc, (enum scheme_opcodes)sc->op) == sc->NIL) {
+		writeOp(sc, (scheme_opcodes)sc->op);
+        if (pcd->func(sc, (scheme_opcodes)sc->op) == sc->NIL) {
             return;
         }
+		sc->pc++;
         if(sc->no_memory) {
             std::cout << " NO MEMORY ERROR " << std::endl;
             fprintf(stderr,"No memory!\n");
@@ -5818,6 +5852,12 @@ int scheme_init(scheme *sc) {
     return scheme_init_custom_alloc(sc,malloc,free);
 }
 
+std::string get_cwd() {
+	char temp[_MAX_PATH];
+	return (_getcwd(temp, sizeof(temp)) ? std::string(temp) : std::string(""));
+}
+
+int num_open = 0;
 int scheme_init_custom_alloc(scheme *sc, func_alloc malloc, func_dealloc free) {
     new (sc) scheme; // initialize properly
     int i, n=sizeof(dispatch_table)/sizeof(dispatch_table[0]);
@@ -6124,7 +6164,8 @@ void scheme_load_file(scheme *sc, FILE *fin) {
     while(!sc->applied_symbol_names.empty())
     {
         sc->applied_symbol_names.pop();
-    }
+		sc->applied_by.pop();
+	}
     sc->last_symbol_apply = sc->NIL;
     sc->error_position = -1;
 
@@ -6171,7 +6212,8 @@ void scheme_load_string(scheme *sc, const char *cmd, uint64_t start_time, uint64
     while(!sc->applied_symbol_names.empty())
     {
         sc->applied_symbol_names.pop();
-    }
+		sc->applied_by.pop();
+	}
     sc->last_symbol_apply = sc->NIL;
     sc->error_position = -1;
 
@@ -6245,7 +6287,8 @@ void scheme_call(scheme *sc, pointer func, pointer args, uint64_t start_time, ui
     while(!sc->applied_symbol_names.empty())
     {
         sc->applied_symbol_names.pop();
-    }
+		sc->applied_by.pop();
+	}
     sc->last_symbol_apply = sc->NIL;
     sc->error_position = -1;
 

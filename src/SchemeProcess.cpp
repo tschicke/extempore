@@ -272,6 +272,9 @@ void* SchemeProcess::taskImpl()
             SchemeTask task = m_taskQueue.front();
             m_taskQueue.pop();
             m_guard.unlock();
+
+			m_scheme->out_file.open(std::string("out_") + m_name + ".log", std::ios::binary | std::ios::trunc);
+
             switch (task.getType()) {
             case SchemeTask::Type::DESTROY_ENV:
                 m_scheme->imp_env.erase(reinterpret_cast<pointer>(task.getPtr()));
@@ -300,6 +303,7 @@ void* SchemeProcess::taskImpl()
                             evalString->erase(--evalString->end());
                         }
                         uint64_t now(UNIV::TIME);
+
                         scheme_load_string(m_scheme, (const char*) evalString->c_str(), now,
                                 now + task.getMaxDuration());
                         if (unlikely(m_scheme->retcode)) { //scheme error
@@ -378,6 +382,7 @@ void* SchemeProcess::taskImpl()
             default:
                 std::cerr << "ERROR: BAD SchemeTask type!!" << std::endl;
             }
+			m_scheme->out_file.close();
         }
     }
     std::cout << "Exiting task thread" << std::endl;
